@@ -1,0 +1,10 @@
+﻿source,target,weight
+Yangzhou,Suzhou,1
+Yangzhou,Nanjing,10
+Yangzhou,Beijing,4
+Suzhou,Hangzhou,2
+Suzhou,Nanjing,5
+Suzhou,Beijing,2
+Hangzhou,Nanjing,4
+Hangzhou,Beijing,2
+Nanjing,Beijing,8
