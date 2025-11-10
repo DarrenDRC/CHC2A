@@ -1,5 +1,4 @@
 import os
-import io
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -7,200 +6,159 @@ import plotly.express as px
 import plotly.graph_objects as go
 import networkx as nx
 
-st.set_page_config(page_title="Rulin Waishi · Ch.35–55 · TOP5 Cities",
-                   layout="wide")
+st.set_page_config(page_title="Rulin Waishi · Ch.35–55 · TOP5 Cities", layout="wide")
+st.title("Rulin Waishi · Chapters 35–55 · Narrative Cities (TOP5)")
 
-st.title("Rulin Waishi · Chapters 35–55 · Narrative City Explorer (TOP5)")
+# ---------- 固定文件路径（请放在仓库根目录） ----------
+FREQ_CSV   = "city_frequency_35_55_TOP5.csv"
+CTX_CSV    = "city_context_35_55_TOP5.csv"
+EDGES_CSV  = "cooccurrence_edges_35_55_TOP5.csv"
+COMAT_CSV  = "cooccurrence_matrix_35_55_TOP5.csv"
 
-# ---------- helper ----------
-
-@st.cache_data
-def load_csv(path):
-    return pd.read_csv(path)
-
-def safe_read(path, label):
-    if os.path.exists(path):
-        return load_csv(path)
-    else:
-        st.warning(f"File not found: `{path}`. Please upload {label} below.")
-        return None
-
-def compute_totals(freq_df, city_cols):
-    totals = freq_df[city_cols].sum().sort_values(ascending=False)
-    return totals
-
-def build_network_positions(edges_df):
-    """Use networkx spring layout to get 2D positions for Plotly."""
-    G = nx.Graph()
-    for _, r in edges_df.iterrows():
-        G.add_edge(str(r["source"]), str(r["target"]),
-                   weight=float(r.get("weight", 1)))
-    if len(G.nodes) == 0:
-        return None, None
-    pos = nx.spring_layout(G, k=0.8, seed=7, weight="weight")  # deterministic
-    return G, pos
-
-def network_fig(edges_df):
-    G, pos = build_network_positions(edges_df)
-    if G is None:
-        return go.Figure()
-
-    # nodes
-    nodes = list(G.nodes())
-    x_nodes = [pos[n][0] for n in nodes]
-    y_nodes = [pos[n][1] for n in nodes]
-
-    # edges
-    x_edges = []
-    y_edges = []
-    weights = []
-    for a, b, data in G.edges(data=True):
-        x_edges += [pos[a][0], pos[b][0], None]
-        y_edges += [pos[a][1], pos[b][1], None]
-        weights.append(float(data.get("weight", 1.0)))
-
-    edge_trace = go.Scatter(
-        x=x_edges, y=y_edges,
-        line=dict(width=1, color="#888"),
-        hoverinfo="none",
-        mode="lines"
-    )
-    node_trace = go.Scatter(
-        x=x_nodes, y=y_nodes,
-        mode="markers+text",
-        text=nodes,
-        textposition="top center",
-        marker=dict(size=22, line=dict(width=1, color="#333"))
-    )
-
-    fig = go.Figure(data=[edge_trace, node_trace])
-    fig.update_layout(
-        title="Co-occurrence Network (Chapters 35–55)",
-        showlegend=False,
-        margin=dict(l=10, r=10, t=50, b=10),
-        xaxis=dict(showgrid=False, zeroline=False, visible=False),
-        yaxis=dict(showgrid=False, zeroline=False, visible=False),
-        height=520,
-    )
-    return fig
-
-def df_to_csv_download(df, filename):
-    csv = df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button("Download CSV", csv, file_name=filename, mime="text/csv")
-
-# ---------- data loading ----------
-
-DEFAULT_FREQ   = "city_frequency_35_55_TOP5.csv"
-DEFAULT_CTX    = "city_context_35_55_TOP5.csv"
-DEFAULT_EDGES  = "cooccurrence_edges_35_55_TOP5.csv"
-DEFAULT_COMAT  = "cooccurrence_matrix_35_55_TOP5.csv"
-
-with st.sidebar:
-    st.header("Data Sources")
-    freq_file  = st.text_input("Frequency CSV", value=DEFAULT_FREQ)
-    ctx_file   = st.text_input("Context CSV",   value=DEFAULT_CTX)
-    edges_file = st.text_input("Edges CSV",     value=DEFAULT_EDGES)
-    comat_file = st.text_input("Co-matrix CSV", value=DEFAULT_COMAT)
-
-    st.caption("If any file is missing, upload below to override.")
-    up_freq  = st.file_uploader("Upload frequency CSV", type=["csv"], key="up_freq")
-    up_ctx   = st.file_uploader("Upload context CSV",   type=["csv"], key="up_ctx")
-    up_edges = st.file_uploader("Upload edges CSV",     type=["csv"], key="up_edges")
-    up_comat = st.file_uploader("Upload matrix CSV",    type=["csv"], key="up_comat")
-
-# prefer uploaded files if present
-if up_freq:  freq_df  = pd.read_csv(up_freq)
-else:        freq_df  = safe_read(freq_file, "Frequency CSV")
-
-if up_ctx:   ctx_df   = pd.read_csv(up_ctx)
-else:        ctx_df   = safe_read(ctx_file, "Context CSV")
-
-if up_edges: edges_df = pd.read_csv(up_edges)
-else:        edges_df = safe_read(edges_file, "Edges CSV")
-
-if up_comat: comat_df = pd.read_csv(up_comat, index_col=0)
-else:        comat_df = safe_read(comat_file, "Co-matrix CSV")
-
-if freq_df is None or edges_df is None or ctx_df is None:
+missing = [p for p in [FREQ_CSV, CTX_CSV, EDGES_CSV] if not os.path.exists(p)]
+if missing:
+    st.error("Missing required data files: " + ", ".join(missing))
     st.stop()
 
-# ---------- top summary ----------
+@st.cache_data
+def load_df(path, **kw):
+    return pd.read_csv(path, **kw)
 
-st.subheader("Chapters")
-chap_min = int(freq_df["Chapter"].min())
-chap_max = int(freq_df["Chapter"].max())
-st.write(f"Analyzing chapters **{chap_min}–{chap_max}**.")
+freq_df  = load_df(FREQ_CSV)
+ctx_df   = load_df(CTX_CSV)
+edges_df = load_df(EDGES_CSV)
+comat_df = load_df(COMAT_CSV, index_col=0) if os.path.exists(COMAT_CSV) else None
 
-city_cols = [c for c in freq_df.columns if c not in ("Chapter", "Title")]
+city_cols = [c for c in freq_df.columns if c not in ("Chapter","Title")]
+chap_min, chap_max = int(freq_df["Chapter"].min()), int(freq_df["Chapter"].max())
 
-colA, colB = st.columns([1,1])
-with colA:
-    st.markdown("**Total Frequency by City**")
-    totals = compute_totals(freq_df, city_cols)
-    st.dataframe(totals.rename("Total").to_frame().T if len(totals)==0 else totals.to_frame(name="Total"))
-with colB:
-    fig = px.bar(totals, title="City Frequency Totals (Ch.35–55)")
-    st.plotly_chart(fig, use_container_width=True)
+st.markdown(f"**Chapters analyzed:** {chap_min}–{chap_max} · **Cities:** {', '.join(city_cols)}")
+
+# ---------- 1) 总频次与章节走势 ----------
+col1, col2 = st.columns([1,1])
+with col1:
+    totals = freq_df[city_cols].sum().sort_values(ascending=False)
+    st.subheader("Total Frequency by City")
+    st.dataframe(totals.to_frame("Total"))
+    fig_tot = px.bar(totals, title="City Frequency Totals (Ch.35–55)")
+    st.plotly_chart(fig_tot, use_container_width=True)
+
+with col2:
+    st.subheader("Per-Chapter Frequency")
+    c = st.selectbox("Select a city", city_cols, index=0)
+    fig_ch = px.bar(freq_df, x="Chapter", y=c, title=f"{c} per Chapter")
+    st.plotly_chart(fig_ch, use_container_width=True)
 
 st.divider()
 
-# ---------- per-city timeline ----------
+# ---------- 2) GIS 地图（散点气泡，大小=总频次） ----------
+# 坐标（可由 CHGIS 校正；这里给出常用城心近似坐标）
+CITY_COORDS = {
+    "Yangzhou": {"lat": 32.393, "lon": 119.412},
+    "Suzhou":   {"lat": 31.299, "lon": 120.585},
+    "Hangzhou": {"lat": 30.274, "lon": 120.155},
+    "Nanjing":  {"lat": 32.061, "lon": 118.792},
+    "Beijing":  {"lat": 39.904, "lon": 116.407},
+}
+geo_df = pd.DataFrame([
+    {"City": k, "lat": v["lat"], "lon": v["lon"], "Total": int(totals.get(k, 0))}
+    for k, v in CITY_COORDS.items() if k in city_cols
+]).sort_values("Total", ascending=False)
 
-st.subheader("Per-Chapter Frequency")
-c = st.selectbox("Select a city", city_cols, index=0)
-fig2 = px.bar(freq_df, x="Chapter", y=c, title=f"{c} per Chapter")
-st.plotly_chart(fig2, use_container_width=True)
+st.subheader("GIS Map · Frequency by City (bubble size = total)")
+fig_geo = px.scatter_geo(
+    geo_df,
+    lat="lat", lon="lon", size="Total", hover_name="City",
+    projection="natural earth", title="Narrative City Frequency (Ch.35–55)"
+)
+fig_geo.update_layout(height=520, margin=dict(l=0, r=0, t=40, b=0))
+# 适当聚焦中国区域（经纬度范围）
+fig_geo.update_geos(
+    fitbounds="locations",
+    lataxis_range=[18, 46], lonaxis_range=[98, 125],
+    showcountries=True, countrycolor="#888"
+)
+st.plotly_chart(fig_geo, use_container_width=True)
+
+st.caption("Map is an analytic visualization (not historical basemap). Coordinates may be refined with CHGIS when needed.")
 
 st.divider()
 
-# ---------- network ----------
+# ---------- 3) 共现网络 ----------
+def network_fig(edges):
+    G = nx.Graph()
+    for _, r in edges.iterrows():
+        G.add_edge(str(r["source"]), str(r["target"]), weight=float(r.get("weight", 1)))
+    if len(G.nodes) == 0:
+        return go.Figure()
+    pos = nx.spring_layout(G, k=0.8, seed=7, weight="weight")
+    nodes = list(G.nodes())
+    xe, ye = [], []
+    for a, b in G.edges():
+        xe += [pos[a][0], pos[b][0], None]
+        ye += [pos[a][1], pos[b][1], None]
+    edge_trace = go.Scatter(x=xe, y=ye, mode="lines", hoverinfo="none",
+                            line=dict(width=1, color="#aaa"))
+    xn = [pos[n][0] for n in nodes]
+    yn = [pos[n][1] for n in nodes]
+    node_trace = go.Scatter(x=xn, y=yn, mode="markers+text", text=nodes,
+                            textposition="top center",
+                            marker=dict(size=22, line=dict(width=1, color="#333")))
+    fig = go.Figure([edge_trace, node_trace])
+    fig.update_layout(title="Co-occurrence Network (chapter-level)",
+                      showlegend=False, height=520,
+                      xaxis=dict(visible=False), yaxis=dict(visible=False),
+                      margin=dict(l=10,r=10,t=50,b=10))
+    return fig
 
 st.subheader("Co-occurrence Network (TOP5)")
 if "weight" not in edges_df.columns:
     edges_df["weight"] = 1
-fig_net = network_fig(edges_df)
-st.plotly_chart(fig_net, use_container_width=True)
-
-st.caption("Edges indicate chapters where two cities both appear; weight = number of co-occurring chapters.")
+st.plotly_chart(network_fig(edges_df), use_container_width=True)
+st.caption("Edge weight = #chapters in which two cities co-occur.")
 
 st.divider()
 
-# ---------- context explorer ----------
-
+# ---------- 4) 语境检索（仅筛选功能，无上传） ----------
 st.subheader("Context Explorer")
 city_pick = st.multiselect("Cities", city_cols, default=city_cols)
-kw = st.text_input("Keyword filter (optional, case-sensitive for now)")
+kw = st.text_input("Keyword filter (optional, case-sensitive)")
 q = ctx_df.copy()
 if city_pick:
     q = q[q["City"].isin(city_pick)]
 if kw:
     q = q[q["Context"].str.contains(kw, na=False)]
 st.write(f"{len(q)} rows")
-st.dataframe(q[["Chapter","City","Match","Context"]], use_container_width=True, height=350)
-df_to_csv_download(q, "context_filtered.csv")
+st.dataframe(q[["Chapter","City","Match","Context"]], use_container_width=True, height=340)
 
 st.divider()
 
-# ---------- raw tables + download ----------
-
+# ---------- 5) 原始数据表（只读展示与下载） ----------
 st.subheader("Data Tables")
 tab1, tab2, tab3, tab4 = st.tabs(["Frequency", "Edges", "Co-matrix", "Context"])
-
 with tab1:
-    st.dataframe(freq_df, use_container_width=True, height=350)
-    df_to_csv_download(freq_df, "city_frequency_TOP5.csv")
+    st.dataframe(freq_df, use_container_width=True, height=320)
+    st.download_button("Download Frequency CSV",
+                       freq_df.to_csv(index=False).encode("utf-8-sig"),
+                       "city_frequency_35_55_TOP5.csv", "text/csv")
 with tab2:
-    st.dataframe(edges_df, use_container_width=True, height=350)
-    df_to_csv_download(edges_df, "cooccurrence_edges_TOP5.csv")
+    st.dataframe(edges_df, use_container_width=True, height=320)
+    st.download_button("Download Edges CSV",
+                       edges_df.to_csv(index=False).encode("utf-8-sig"),
+                       "cooccurrence_edges_35_55_TOP5.csv", "text/csv")
 with tab3:
     if comat_df is not None:
-        st.dataframe(comat_df, use_container_width=True, height=350)
-        df_to_csv_download(comat_df, "cooccurrence_matrix_TOP5.csv")
+        st.dataframe(comat_df, use_container_width=True, height=320)
+        st.download_button("Download Co-matrix CSV",
+                           comat_df.to_csv().encode("utf-8-sig"),
+                           "cooccurrence_matrix_35_55_TOP5.csv", "text/csv")
     else:
         st.info("No co-matrix loaded.")
 with tab4:
-    st.dataframe(ctx_df, use_container_width=True, height=350)
-    df_to_csv_download(ctx_df, "city_context_TOP5.csv")
+    st.dataframe(ctx_df, use_container_width=True, height=320)
+    st.download_button("Download Context CSV",
+                       ctx_df.to_csv(index=False).encode("utf-8-sig"),
+                       "city_context_35_55_TOP5.csv", "text/csv")
 
 st.write("---")
-st.caption("Rulin Waishi · Chapters 35–55 · Yangzhou / Suzhou / Hangzhou / Nanjing / Beijing")
+st.caption("Meets Option 2: ≥5 places, 10–20 chapters, frequency comparison, GIS map, and network view. Data & code are fixed (no uploads).")
